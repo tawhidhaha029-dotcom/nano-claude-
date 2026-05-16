@@ -38,7 +38,7 @@ const mem = new Map(); // userId → { name, conversations: Map }
 
 async function dbQuery(q, ...p) {
   if (!sql) return null;
-  try { return await sql(q, ...p); } catch (e) { console.error("DB:", e.message); return null; }
+  try { return await sql(q, p); } catch (e) { console.error("DB:", e.message); return null; }
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
