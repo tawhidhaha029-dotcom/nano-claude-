@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Nano Claude — Local LLM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #07080f;
+  --s1:       #0d0f1a;
+  --s2:       #131525;
+  --s3:       #1b1d30;
+  --border:   #252740;
+  --accent:   #5b8af0;
+  --accent2:  #00e5c3;
+  --glow:     rgba(91,138,240,.18);
+  --glow2:    rgba(0,229,195,.12);
+  --text:     #d8ddf5;
+  --muted:    #5c607e;
+  --danger:   #ff5577;
+  --success:  #00e5c3;
+  --warn:     #ffb547;
+  --mono:     'IBM Plex Mono', monospace;
+  --sans:     'Outfit', sans-serif;
+  --r:        10px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Grain */
+body::after {
+  content:'';
+  position:fixed;inset:0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events:none;
+  z-index:999;
+  opacity:.5;
+}
+
+/* ── Model bar ── */
+#model-bar {
+  background: var(--s1);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.model-bar-logo {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: -0.5px;
+  white-space: nowrap;
+}
+.model-bar-logo span { color: var(--accent2); }
+
+#model-select {
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 5px 8px;
+  outline: none;
+  cursor: pointer;
+}
+
+#load-btn {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border: none;
+  border-radius: 6px;
+  color: #000;
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: 12px;
+  padding: 5px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity .2s;
+}
+#load-btn:hover { opacity: .85; }
+#load-btn:disabled { opacity: .4; cursor: default; }
+
+#status-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+.s-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+.s-dot.ready  { background: var(--success); animation: pulse 2s infinite; }
+.s-dot.loading{ background: var(--warn); animation: pulse .6s infinite; }
+.s-dot.error  { background: var(--danger); }
+
+@keyframes pulse {
+  0%,100% { opacity:1; }
+  50%      { opacity:.3; }
+}
+
+#progress-wrap {
+  flex-basis: 100%;
+  display: none;
+}
+#progress-bar-outer {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+#progress-bar-inner {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  width: 0%;
+  transition: width .3s;
+}
+#progress-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+/* ── Body ── */
+#body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* ── Sidebar ── */
+#sidebar {
+  width: 240px;
+  background: var(--s1);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  transition: transform .3s cubic-bezier(.4,0,.2,1);
+}
+
+.sb-top {
+  padding: 12px 12px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+#new-btn {
+  width: 100%;
+  padding: 9px;
+  background: var(--s2);
+  border: 1px dashed var(--border);
+  border-radius: var(--r);
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all .2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+#new-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--glow); }
+
+.conv-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.conv-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 6px 6px 4px;
+}
+.conv-item {
+  padding: 9px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 2px;
+  transition: all .15s;
+}
+.conv-item:hover { background: var(--s2); color: var(--text); }
+.conv-item.active { background: var(--s3); color: var(--accent); border-left: 2px solid var(--accent); }
+.conv-title { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.conv-del {
+  opacity:0; color: var(--danger); background:none; border:none;
+  font-size:13px; cursor:pointer; padding:2px 4px; transition:opacity .15s;
+}
+.conv-item:hover .conv-del { opacity: 1; }
+
+.sb-foot {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+#db-row { display:flex; align-items:center; gap:6px; }
+
+/* ── Chat area ── */
+#chat-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#topbar {
+  height: 48px;
+  border-bottom: 1px solid var(--border);
+  background: var(--s1);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 10px;
+  flex-shrink: 0;
+}
+#menu-btn {
+  display: none;
+  background:none;border:none;color:var(--text);font-size:18px;cursor:pointer;padding:4px;
+}
+#chat-title {
+  flex:1;
+  font-size:13px;
+  color: var(--muted);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+
+#messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* ── Welcome ── */
+#welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  text-align: center;
+  gap: 10px;
+  padding: 28px;
+}
+.wlc-logo {
+  width: 58px; height: 58px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-radius: 16px;
+  display: flex;align-items:center;justify-content:center;
+  font-size: 26px;
+  box-shadow: 0 0 30px var(--glow), 0 0 60px var(--glow2);
+  margin-bottom: 6px;
+}
+#welcome h1 { font-size:24px;font-weight:800;letter-spacing:-0.5px; }
+#welcome h1 span { color: var(--accent2); }
+#welcome p { color:var(--muted);font-size:13px;max-width:320px;line-height:1.6; }
+.chips { display:flex;flex-wrap:wrap;gap:7px;justify-content:center;max-width:400px;margin-top:10px; }
+.chip {
+  padding:7px 13px;
+  border:1px solid var(--border);
+  border-radius:20px;
+  font-size:11.5px;
+  font-family:var(--mono);
+  color:var(--muted);
+  cursor:pointer;
+  background:none;
+  transition:all .2s;
+}
+.chip:hover { border-color:var(--accent);color:var(--accent);background:var(--glow); }
+
+/* ── Load warning ── */
+#load-warn {
+  background: rgba(255,181,71,.08);
+  border: 1px solid rgba(255,181,71,.25);
+  border-radius: var(--r);
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--warn);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 480px;
+  text-align: left;
+}
+
+/* ── Messages ── */
+.msg {
+  display: flex;
+  gap: 10px;
+  max-width: 760px;
+  animation: fadeUp .2s ease;
+}
+@keyframes fadeUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+.msg.user      { flex-direction:row-reverse; align-self:flex-end; }
+.msg.assistant { align-self:flex-start; }
+.msg-av {
+  width:28px;height:28px;
+  border-radius:7px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;
+  flex-shrink:0;
+  margin-top:2px;
+}
+.msg.user .msg-av { background:var(--s3);border:1px solid var(--border); }
+.msg.assistant .msg-av {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  box-shadow: 0 0 10px var(--glow);
+}
+.msg-bub {
+  padding:11px 15px;
+  border-radius:var(--r);
+  font-size:13.5px;
+  line-height:1.65;
+  word-break:break-word;
+  max-width:100%;
+}
+.msg.user .msg-bub { background:var(--s2);border:1px solid var(--border);border-top-right-radius:3px; }
+.msg.assistant .msg-bub { background:var(--s1);border:1px solid var(--border);border-top-left-radius:3px; }
+.msg-bub code {
+  font-family:var(--mono);font-size:11.5px;
+  background:rgba(91,138,240,.1);border:1px solid rgba(91,138,240,.2);
+  padding:1px 5px;border-radius:4px;color:var(--accent);
+}
+.msg-bub pre {
+  background:#050610;border:1px solid var(--border);
+  border-radius:8px;padding:12px;overflow-x:auto;
+  margin:8px 0;font-family:var(--mono);font-size:11.5px;
+}
+.msg-bub pre code { background:none;border:none;padding:0;color:var(--text); }
+.msg-bub strong { color:var(--accent2);font-weight:600; }
+.cursor {
+  display:inline-block;width:2px;height:14px;
+  background:var(--accent);
+  margin-left:2px;vertical-align:middle;
+  animation:blink .8s infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+/* ── Input ── */
+#input-area {
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--s1);
+  flex-shrink: 0;
+}
+#input-row {
+  display:flex;align-items:flex-end;gap:8px;
+  background:var(--s2);
+  border:1px solid var(--border);
+  border-radius:var(--r);
+  padding:8px 10px;
+  transition:border-color .2s, box-shadow .2s;
+}
+#input-row:focus-within { border-color:var(--accent);box-shadow:0 0 14px var(--glow); }
+#inp {
+  flex:1;background:none;border:none;outline:none;
+  color:var(--text);font-family:var(--sans);font-size:14px;
+  line-height:1.5;resize:none;max-height:120px;min-height:24px;
+}
+#inp::placeholder { color:var(--muted); }
+#stop-btn, #send-btn {
+  width:34px;height:34px;
+  border-radius:7px;border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;flex-shrink:0;transition:all .2s;
+}
+#send-btn {
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:#000;box-shadow:0 0 10px var(--glow);
+}
+#send-btn:hover { transform:scale(1.06); }
+#send-btn:disabled { opacity:.35;transform:none;cursor:default; }
+#stop-btn { background:rgba(255,85,119,.15);border:1px solid var(--danger);color:var(--danger); display:none; }
+#stop-btn.show { display:flex; }
+.hint {
+  font-family:var(--mono);font-size:10px;color:var(--muted);
+  margin-top:5px;padding-left:3px;
+}
+
+/* ── Name modal ── */
+#modal-bg {
+  position:fixed;inset:0;
+  background:rgba(0,0,0,.8);backdrop-filter:blur(10px);
+  display:flex;align-items:center;justify-content:center;
+  z-index:500;
+}
+.modal {
+  background:var(--s1);border:1px solid var(--border);
+  border-radius:16px;padding:28px;width:min(360px,90vw);
+  text-align:center;
+  animation:popIn .3s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes popIn { from{opacity:0;transform:scale(.85)} to{opacity:1;transform:none} }
+.modal .logo { width:44px;height:44px;font-size:20px;border-radius:12px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  display:flex;align-items:center;justify-content:center;margin:0 auto 14px; }
+.modal h2 { font-size:20px;font-weight:800;margin-bottom:5px; }
+.modal p  { color:var(--muted);font-size:12.5px;margin-bottom:18px;line-height:1.6; }
+.modal input {
+  width:100%;padding:10px 13px;
+  background:var(--s2);border:1px solid var(--border);
+  border-radius:8px;color:var(--text);font-family:var(--sans);
+  font-size:14px;outline:none;margin-bottom:10px;
+  transition:border-color .2s;
+}
+.modal input:focus { border-color:var(--accent); }
+.modal button {
+  width:100%;padding:11px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  border:none;border-radius:8px;color:#000;
+  font-family:var(--sans);font-size:14px;font-weight:700;cursor:pointer;
+}
+.modal button:hover { opacity:.9; }
+
+/* ── Mobile ── */
+#overlay { display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:90; }
+@media(max-width:580px) {
+  #sidebar { position:fixed;left:0;top:0;bottom:0;z-index:100;transform:translateX(-100%); }
+  #sidebar.open { transform:none; }
+  #overlay.show { display:block; }
+  #menu-btn { display:block; }
+  .msg { max-width:100%; }
+}
+</style>
+</head>
+<body>
+
+<div id="overlay" onclick="closeSb()"></div>
+
+<!-- ── Model bar ── -->
+<div id="model-bar">
+  <div class="model-bar-logo">nano<span>claude</span></div>
+
+  <select id="model-select">
+    <option value="smol-135m">SmolLM2 135M ⚡ (~90MB) — ESP32-class</option>
+    <option value="smol-360m" selected>SmolLM2 360M 🚀 (~220MB) — Mobile</option>
+    <option value="tinyllama">TinyLlama 1.1B 🧠 (~600MB) — Render free</option>
+    <option value="phi3-mini">Phi-3 Mini 🌟 (~2.3GB) — Full hosting</option>
+  </select>
+
+  <button id="load-btn" onclick="loadModel()">Load Model</button>
+
+  <div id="status-pill">
+    <div class="s-dot" id="s-dot"></div>
+    <span id="s-text">No model loaded</span>
+  </div>
+
+  <div id="progress-wrap">
+    <div id="progress-bar-outer"><div id="progress-bar-inner"></div></div>
+    <div id="progress-label">Initializing…</div>
+  </div>
+</div>
+
+<!-- ── Body ── -->
+<div id="body">
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div class="sb-top">
+      <button id="new-btn" onclick="newChat()">＋ New chat</button>
+    </div>
+    <div class="conv-list" id="conv-list">
+      <div class="conv-label">History</div>
+      <div style="padding:16px 6px;color:var(--muted);font-size:12px;text-align:center">No chats yet</div>
+    </div>
+    <div class="sb-foot">
+      <div id="db-row">
+        <div class="s-dot" id="db-dot"></div>
+        <span id="db-lbl">Checking DB…</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <div id="chat-area">
+    <div id="topbar">
+      <button id="menu-btn" onclick="toggleSb()">☰</button>
+      <div id="chat-title">Nano Claude — Local LLM</div>
+    </div>
+
+    <div id="messages">
+      <div id="welcome">
+        <div class="wlc-logo">🧠</div>
+        <h1>Nano<span>Claude</span></h1>
+        <p>A real LLM running 100% in your browser.<br>No API key. No payment. No server AI.</p>
+        <div id="load-warn">
+          ⚠️ Select a model above and click <strong>Load Model</strong> to begin. Downloads once, then cached.
+        </div>
+        <div class="chips">
+          <button class="chip" onclick="chip(this)">Write a Python script</button>
+          <button class="chip" onclick="chip(this)">Explain blockchain simply</button>
+          <button class="chip" onclick="chip(this)">Halal investment ideas</button>
+          <button class="chip" onclick="chip(this)">Game development tips</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="input-area">
+      <div id="input-row">
+        <textarea id="inp" placeholder="Type a message…" rows="1"
+          onkeydown="onKey(event)" oninput="resize(this)"></textarea>
+        <button id="stop-btn" onclick="stopGen()" title="Stop">■</button>
+        <button id="send-btn" onclick="send()" title="Send" disabled>➤</button>
+      </div>
+      <div class="hint">Enter to send · Shift+Enter newline · Model runs locally in browser</div>
+    </div>
+  </div>
+</div>
+
+<!-- Name modal -->
+<div id="modal-bg">
+  <div class="modal">
+    <div class="logo">🧠</div>
+    <h2>Welcome to NanoClaude</h2>
+    <p>Enter your name to save chat history.<br>The LLM runs entirely on your device — no API key needed.</p>
+    <input id="name-inp" type="text" placeholder="Your name" maxlength="40"
+      onkeydown="if(event.key==='Enter')startUser()">
+    <button onclick="startUser()">Start →</button>
+  </div>
+</div>
+
+<script>
+// ══ State ═════════════════════════════════════════════════════════════════════
+let userId    = localStorage.getItem('nc_uid') || null;
+let userName  = localStorage.getItem('nc_name') || null;
+let convId    = null;
+let worker    = null;
+let modelReady = false;
+let generating = false;
+let history   = []; // { role, content }[]
+
+// ══ Worker setup ══════════════════════════════════════════════════════════════
+function initWorker() {
+  worker = new Worker('/llm.worker.js', { type: 'module' });
+  worker.onmessage = onWorkerMsg;
+  worker.onerror = (e) => setStatus('error', 'Worker error: ' + e.message);
+}
+
+function onWorkerMsg(e) {
+  const d = e.data;
+  switch (d.type) {
+
+    case 'loading':
+      setStatus('loading', `Loading ${d.label}…`);
+      showProgress(true);
+      break;
+
+    case 'progress': {
+      const p = d.data;
+      if (p.status === 'downloading' || p.status === 'loading') {
+        const pct = p.total ? Math.round((p.loaded / p.total) * 100) : 0;
+        document.getElementById('progress-bar-inner').style.width = pct + '%';
+        const mb = p.total ? ` (${(p.loaded/1e6).toFixed(1)}/${(p.total/1e6).toFixed(1)} MB)` : '';
+        document.getElementById('progress-label').textContent =
+          `${p.file || 'Loading…'} ${pct}%${mb}`;
+      }
+      break;
+    }
+
+    case 'ready':
+      modelReady = true;
+      showProgress(false);
+      setStatus('ready', d.label || 'Model ready');
+      document.getElementById('send-btn').disabled = false;
+      document.getElementById('load-btn').disabled = false;
+      document.getElementById('load-warn')?.remove();
+      break;
+
+    case 'token': {
+      // Streaming token — update the current assistant bubble
+      const bub = document.getElementById('ai-streaming');
+      if (bub) {
+        bub.innerHTML = renderMd(d.full) + '<span class="cursor"></span>';
+        scrollBottom();
+      }
+      break;
+    }
+
+    case 'done': {
+      generating = false;
+      document.getElementById('stop-btn').classList.remove('show');
+      document.getElementById('send-btn').disabled = false;
+
+      const bub = document.getElementById('ai-streaming');
+      if (bub) {
+        bub.id = '';
+        bub.innerHTML = renderMd(d.text);
+      }
+
+      // Add to local history
+      const lastUser = history[history.length - 1];
+      history.push({ role: 'assistant', content: d.text });
+
+      // Save to DB
+      if (convId && userId) {
+        const autoTitle = history.length <= 2
+          ? lastUser.content.slice(0, 60) + (lastUser.content.length > 60 ? '…' : '')
+          : null;
+        fetch('/api/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            conversationId: convId,
+            userMessage: lastUser.content,
+            aiMessage: d.text,
+            autoTitle,
+          })
+        }).then(() => loadConvs());
+      }
+      scrollBottom();
+      break;
+    }
+
+    case 'aborted':
+      generating = false;
+      document.getElementById('stop-btn').classList.remove('show');
+      document.getElementById('send-btn').disabled = false;
+      const bub = document.getElementById('ai-streaming');
+      if (bub) { bub.id = ''; bub.innerHTML += ' <em style="color:var(--muted)">[stopped]</em>'; }
+      break;
+
+    case 'error':
+      setStatus('error', d.message);
+      generating = false;
+      document.getElementById('stop-btn').classList.remove('show');
+      document.getElementById('send-btn').disabled = !modelReady;
+      break;
+  }
+}
+
+// ══ Model loading ═════════════════════════════════════════════════════════════
+function loadModel() {
+  if (!worker) initWorker();
+  const key = document.getElementById('model-select').value;
+  modelReady = false;
+  document.getElementById('load-btn').disabled = true;
+  document.getElementById('send-btn').disabled = true;
+  setStatus('loading', 'Starting…');
+  worker.postMessage({ type: 'load', modelKey: key });
+}
+
+function stopGen() {
+  if (worker) worker.postMessage({ type: 'stop' });
+}
+
+// ══ Chat ══════════════════════════════════════════════════════════════════════
+async function send() {
+  if (!modelReady || generating) return;
+  const inp = document.getElementById('inp');
+  const text = inp.value.trim();
+  if (!text) return;
+
+  if (!convId) await newChat();
+
+  document.getElementById('welcome')?.remove();
+  inp.value = '';
+  resize(inp);
+
+  // Push to local history
+  history.push({ role: 'user', content: text });
+
+  // Render user bubble
+  appendMsg('user', text);
+
+  // Render empty AI bubble (streaming target)
+  const aiDiv = appendMsg('assistant', '');
+  aiDiv.querySelector('.msg-bub').id = 'ai-streaming';
+  aiDiv.querySelector('.msg-bub').innerHTML = '<span class="cursor"></span>';
+  scrollBottom();
+
+  generating = true;
+  document.getElementById('send-btn').disabled = true;
+  document.getElementById('stop-btn').classList.add('show');
+
+  // Send to worker — pass last N turns for context
+  const MAX_CTX = 20;
+  const ctx = history.slice(-MAX_CTX - 1, -1); // exclude current user msg
+  const msgs = [...ctx, { role: 'user', content: text }];
+
+  worker.postMessage({ type: 'generate', messages: msgs, maxNewTokens: 512 });
+}
+
+function chip(btn) {
+  document.getElementById('inp').value = btn.textContent;
+  send();
+}
+
+// ══ Conversations ═════════════════════════════════════════════════════════════
+async function newChat() {
+  if (!userId) return;
+  history = [];
+  const r = await fetch('/api/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+  });
+  const d = await r.json();
+  convId = d.conversation.id;
+  document.getElementById('chat-title').textContent = 'New Chat';
+  clearMsgs();
+  await loadConvs();
+  closeSb();
+}
+
+async function openConv(id, title) {
+  convId = id;
+  history = [];
+  document.getElementById('chat-title').textContent = title;
+  clearMsgs();
+
+  const r = await fetch(`/api/messages/${id}`);
+  const d = await r.json();
+  d.messages.forEach(m => {
+    history.push({ role: m.role, content: m.content });
+    appendMsg(m.role, m.content);
+  });
+  scrollBottom();
+  await loadConvs();
+  closeSb();
+}
+
+async function delConv(e, id) {
+  e.stopPropagation();
+  if (!confirm('Delete this conversation?')) return;
+  await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
+  if (convId === id) { convId = null; history = []; clearMsgs(); }
+  await loadConvs();
+}
+
+async function loadConvs() {
+  if (!userId) return;
+  const r = await fetch(`/api/conversations/${userId}`);
+  const d = await r.json();
+  const el = document.getElementById('conv-list');
+  if (!d.conversations.length) {
+    el.innerHTML = '<div class="conv-label">History</div><div style="padding:16px 6px;color:var(--muted);font-size:12px;text-align:center">No chats yet</div>';
+    return;
+  }
+  el.innerHTML = '<div class="conv-label">History</div>' +
+    d.conversations.map(c => `
+      <div class="conv-item ${c.id===convId?'active':''}" onclick="openConv('${c.id}','${esc(c.title)}')">
+        <span class="conv-title">${esc(c.title||'New Chat')}</span>
+        <button class="conv-del" onclick="delConv(event,'${c.id}')">✕</button>
+      </div>`).join('');
+}
+
+// ══ Users ═════════════════════════════════════════════════════════════════════
+async function startUser() {
+  const name = document.getElementById('name-inp').value.trim() || 'User';
+  const r = await fetch('/api/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  const d = await r.json();
+  userId = d.user.id; userName = name;
+  localStorage.setItem('nc_uid', userId);
+  localStorage.setItem('nc_name', userName);
+  document.getElementById('modal-bg').style.display = 'none';
+  await loadConvs();
+}
+
+async function verifyUser() {
+  const r = await fetch('/api/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, name: userName })
+  });
+  const d = await r.json();
+  userId = d.user.id;
+  localStorage.setItem('nc_uid', userId);
+}
+
+// ══ UI helpers ════════════════════════════════════════════════════════════════
+function appendMsg(role, content) {
+  const el = document.getElementById('messages');
+  const d = document.createElement('div');
+  d.className = `msg ${role}`;
+  d.innerHTML = `
+    <div class="msg-av">${role==='user'?'👤':'🧠'}</div>
+    <div class="msg-bub">${content ? renderMd(content) : ''}</div>`;
+  el.appendChild(d);
+  return d;
+}
+
+function clearMsgs() {
+  document.getElementById('messages').innerHTML = `
+    <div id="welcome">
+      <div class="wlc-logo">🧠</div>
+      <h1>Nano<span style="color:var(--accent2)">Claude</span></h1>
+      <p>A real LLM running 100% in your browser.<br>No API key. No payment. No server AI.</p>
+      ${modelReady ? '' : '<div class="load-warn" id="load-warn" style="background:rgba(255,181,71,.08);border:1px solid rgba(255,181,71,.25);border-radius:10px;padding:12px 16px;font-size:13px;color:var(--warn);display:flex;align-items:center;gap:8px;max-width:480px">⚠️ Load a model above to start chatting.</div>'}
+      <div class="chips">
+        <button class="chip" onclick="chip(this)">Write a Python script</button>
+        <button class="chip" onclick="chip(this)">Explain blockchain simply</button>
+        <button class="chip" onclick="chip(this)">Halal investment ideas</button>
+        <button class="chip" onclick="chip(this)">Game development tips</button>
+      </div>
+    </div>`;
+}
+
+function scrollBottom() {
+  const el = document.getElementById('messages');
+  el.scrollTop = el.scrollHeight;
+}
+
+function setStatus(state, text) {
+  const dot = document.getElementById('s-dot');
+  const lbl = document.getElementById('s-text');
+  dot.className = 's-dot ' + state;
+  lbl.textContent = text;
+}
+
+function showProgress(show) {
+  document.getElementById('progress-wrap').style.display = show ? 'block' : 'none';
+  if (!show) {
+    document.getElementById('progress-bar-inner').style.width = '0%';
+  }
+}
+
+function onKey(e) {
+  if (e.key==='Enter'&&!e.shiftKey) { e.preventDefault(); send(); }
+}
+function resize(el) {
+  el.style.height='auto';
+  el.style.height=Math.min(el.scrollHeight,120)+'px';
+}
+function toggleSb() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('overlay').classList.toggle('show');
+}
+function closeSb() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('overlay').classList.remove('show');
+}
+
+// Lightweight markdown
+function renderMd(t) {
+  return t
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/```[\w]*\n?([\s\S]*?)```/g,'<pre><code>$1</code></pre>')
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/^### (.+)$/gm,'<strong>$1</strong>')
+    .replace(/\n/g,'<br>');
+}
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ══ Init ══════════════════════════════════════════════════════════════════════
+(async () => {
+  // DB status
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    const dot = document.getElementById('db-dot');
+    const lbl = document.getElementById('db-lbl');
+    if (d.db) { dot.style.background='var(--success)'; lbl.textContent='Neon DB'; }
+    else      { dot.style.background='var(--warn)';    lbl.textContent='Memory mode'; }
+  } catch(e) {}
+
+  // User
+  if (userId && userName) {
+    document.getElementById('modal-bg').style.display = 'none';
+    await verifyUser();
+    await loadConvs();
+  }
+})();
+</script>
+</body>
+</html>
